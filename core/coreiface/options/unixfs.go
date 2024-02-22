@@ -36,6 +36,8 @@ type UnixfsAddSettings struct {
 	Events   chan<- interface{}
 	Silent   bool
 	Progress bool
+
+	ToFiles string
 }
 
 type UnixfsLsSettings struct {
@@ -43,9 +45,54 @@ type UnixfsLsSettings struct {
 	UseCumulativeSize bool
 }
 
+type UnixfsMkdirSettings struct {
+	Parents    bool
+	CidVersion int
+	MhType     uint64
+}
+
+type UnixfsRmSettings struct {
+	Recursive bool
+	Force     bool
+}
+
+type UnixfsCpSettings struct {
+	Parents bool
+}
+
+type UnixfsReadSettings struct {
+	Offset int64
+	Count  int64
+}
+
+type UnixfsStatSettings struct {
+	Format    string
+	Hash      bool
+	Size      bool
+	WithLocal bool
+}
+
+type UnixfsWriteSettings struct {
+	Offset    int64
+	Create    bool
+	Parents   bool
+	Truncate  bool
+	Count     int64
+	RawLeaves bool
+
+	CidVersion int
+	MhType     uint64
+}
+
 type (
-	UnixfsAddOption func(*UnixfsAddSettings) error
-	UnixfsLsOption  func(*UnixfsLsSettings) error
+	UnixfsAddOption   func(*UnixfsAddSettings) error
+	UnixfsLsOption    func(*UnixfsLsSettings) error
+	UnixfsMkdirOption func(*UnixfsMkdirSettings) error
+	UnixfsRmOption    func(*UnixfsRmSettings) error
+	UnixfsCpOption    func(*UnixfsCpSettings) error
+	UnixfsReadOption  func(*UnixfsReadSettings) error
+	UnixfsStatOption  func(*UnixfsStatSettings) error
+	UnixfsWriteOption func(*UnixfsWriteSettings) error
 )
 
 func UnixfsAddOptions(opts ...UnixfsAddOption) (*UnixfsAddSettings, cid.Prefix, error) {
@@ -122,6 +169,59 @@ func UnixfsAddOptions(opts ...UnixfsAddOption) (*UnixfsAddSettings, cid.Prefix, 
 	return options, prefix, nil
 }
 
+func UnixfsWriteOptions(opts ...UnixfsWriteOption) (*UnixfsWriteSettings, cid.Prefix, error) {
+	options := &UnixfsWriteSettings{
+		CidVersion: -1,
+		MhType:     mh.SHA2_256,
+
+		Offset:    0,
+		Create:    false,
+		Parents:   false,
+		Truncate:  false,
+		Count:     0,
+		RawLeaves: false,
+	}
+
+	for _, opt := range opts {
+		err := opt(options)
+		if err != nil {
+			return nil, cid.Prefix{}, err
+		}
+	}
+
+	// (hash != "sha2-256") -> CIDv1
+	if options.MhType != mh.SHA2_256 {
+		switch options.CidVersion {
+		case 0:
+			return nil, cid.Prefix{}, errors.New("CIDv0 only supports sha2-256")
+		case 1, -1:
+			options.CidVersion = 1
+		default:
+			return nil, cid.Prefix{}, fmt.Errorf("unknown CID version: %d", options.CidVersion)
+		}
+	} else {
+		if options.CidVersion < 0 {
+			// Default to CIDv0
+			options.CidVersion = 0
+		}
+	}
+
+	// cidV1 -> raw blocks (by default)
+	if options.CidVersion > 0 && !options.RawLeaves {
+		options.RawLeaves = true
+	}
+
+	prefix, err := dag.PrefixForCidVersion(options.CidVersion)
+	if err != nil {
+		return nil, cid.Prefix{}, err
+	}
+
+	prefix.MhType = options.MhType
+	prefix.MhLength = -1
+
+	return options, prefix, nil
+}
+
 func UnixfsLsOptions(opts ...UnixfsLsOption) (*UnixfsLsSettings, error) {
 	options := &UnixfsLsSettings{
 		ResolveChildren: true,
@@ -135,6 +235,113 @@ func UnixfsLsOptions(opts ...UnixfsLsOption) (*UnixfsLsSettings, error) {
 	}
 
 	return options, nil
+}
+
+func UnixfsStatOptions(opts ...UnixfsStatOption) (*UnixfsStatSettings, error) {
+	options := &UnixfsStatSettings{
+		Format:    "",
+		Hash:      false,
+		Size:      false,
+		WithLocal: false,
+	}
+
+	for _, opt := range opts {
+		err := opt(options)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return options, nil
+}
+
+func UnixfsReadOptions(opts ...UnixfsReadOption) (*UnixfsReadSettings, error) {
+	options := &UnixfsReadSettings{
+		Offset: 0,
+		Count:  0,
+	}
+
+	for _, opt := range opts {
+		err := opt(options)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return options, nil
+}
+
+func UnixfsCpOptions(opts ...UnixfsCpOption) (*UnixfsCpSettings, error) {
+	options := &UnixfsCpSettings{
+		Parents: false,
+	}
+
+	for _, opt := range opts {
+		err := opt(options)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return options, nil
+}
+
+func UnixfsRmOptions(opts ...UnixfsRmOption) (*UnixfsRmSettings, error) {
+	options := &UnixfsRmSettings{
+		Recursive: false,
+		Force:     false,
+	}
+
+	for _, opt := range opts {
+		err := opt(options)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return options, nil
+}
+
+func UnixfsMkdirOptions(opts ...UnixfsMkdirOption) (*UnixfsMkdirSettings, cid.Prefix, error) {
+	options := &UnixfsMkdirSettings{
+		Parents:    false,
+		CidVersion: -1,
+		MhType:     mh.SHA2_256,
+	}
+
+	for _, opt := range opts {
+		err := opt(options)
+		if err != nil {
+			return nil, cid.Prefix{}, err
+		}
+	}
+
+	// (hash != "sha2-256") -> CIDv1
+	if options.MhType != mh.SHA2_256 {
+		switch options.CidVersion {
+		case 0:
+			return nil, cid.Prefix{}, errors.New("CIDv0 only supports sha2-256")
+		case 1, -1:
+			options.CidVersion = 1
+		default:
+			return nil, cid.Prefix{}, fmt.Errorf("unknown CID version: %d", options.CidVersion)
+		}
+	} else {
+		if options.CidVersion < 0 {
+			// Default to CIDv0
+			options.CidVersion = 0
+		}
+	}
+
+	prefix, err := dag.PrefixForCidVersion(options.CidVersion)
+	if err != nil {
+		return nil, cid.Prefix{}, err
+	}
+
+	prefix.MhType = options.MhType
+	prefix.MhLength = -1
+
+	return options, prefix, nil
 }
 
 type unixfsOpts struct{}
@@ -260,6 +467,14 @@ func (unixfsOpts) Progress(enable bool) UnixfsAddOption {
 	}
 }
 
+// ToFiles tells the adder whether to add reference to Files API (MFS) at the provided path
+func (unixfsOpts) ToFiles(path string) UnixfsAddOption {
+	return func(settings *UnixfsAddSettings) error {
+		settings.ToFiles = path
+		return nil
+	}
+}
+
 // FsCache tells the adder to check the filestore for pre-existing blocks
 //
 // Experimental
@@ -290,6 +505,170 @@ func (unixfsOpts) ResolveChildren(resolve bool) UnixfsLsOption {
 func (unixfsOpts) UseCumulativeSize(use bool) UnixfsLsOption {
 	return func(settings *UnixfsLsSettings) error {
 		settings.UseCumulativeSize = use
+		return nil
+	}
+}
+
+// Parents No error if existing, make parent directories as needed
+func (unixfsOpts) Parents(parents bool) UnixfsMkdirOption {
+	return func(settings *UnixfsMkdirSettings) error {
+		settings.Parents = parents
+		return nil
+	}
+}
+
+// MkdirCidVersion cid version to use.
+//
+// Experimental
+func (unixfsOpts) MkdirCidVersion(cidVer int) UnixfsMkdirOption {
+	return func(settings *UnixfsMkdirSettings) error {
+		settings.CidVersion = cidVer
+		return nil
+	}
+}
+
+// MkdirHash Hash function to use. Will set Cid version to 1 if used.
+//
+// Experimental
+func (unixfsOpts) MkdirHash(mhtype uint64) UnixfsMkdirOption {
+	return func(settings *UnixfsMkdirSettings) error {
+		settings.MhType = mhtype
+		return nil
+	}
+}
+
+// Recursive remove directories
+func (unixfsOpts) Recursive(recursive bool) UnixfsRmOption {
+	return func(settings *UnixfsRmSettings) error {
+		settings.Recursive = recursive
+		return nil
+	}
+}
+
+// Force forcibly remove target at path
+func (unixfsOpts) Force(force bool) UnixfsRmOption {
+	return func(settings *UnixfsRmSettings) error {
+		settings.Force = force
+		return nil
+	}
+}
+
+// Parents make parent directories as needed
+func (unixfsOpts) CpParents(parent bool) UnixfsCpOption {
+	return func(settings *UnixfsCpSettings) error {
+		settings.Parents = parent
+		return nil
+	}
+}
+
+// Parents make parent directories as needed
+func (unixfsOpts) Offset(offset int64) UnixfsReadOption {
+	return func(settings *UnixfsReadSettings) error {
+		settings.Offset = offset
+		return nil
+	}
+}
+
+// Parents make parent directories as needed
+func (unixfsOpts) Count(count int64) UnixfsReadOption {
+	return func(settings *UnixfsReadSettings) error {
+		settings.Count = count
+		return nil
+	}
+}
+
+// Format print statistics in given format
+func (unixfsOpts) Format(format string) UnixfsStatOption {
+	return func(settings *UnixfsStatSettings) error {
+		settings.Format = format
+		return nil
+	}
+}
+
+// Hash print only hash
+func (unixfsOpts) StatHash(hash bool) UnixfsStatOption {
+	return func(settings *UnixfsStatSettings) error {
+		settings.Hash = hash
+		return nil
+	}
+}
+
+// StatSize print only size
+func (unixfsOpts) StatSize(size bool) UnixfsStatOption {
+	return func(settings *UnixfsStatSettings) error {
+		settings.Size = size
+		return nil
+	}
+}
+
+// WithLocal compute the amount of the dag that is local, and if possible the total size.
+func (unixfsOpts) WithLocal(withLocal bool) UnixfsStatOption {
+	return func(settings *UnixfsStatSettings) error {
+		settings.WithLocal = withLocal
+		return nil
+	}
+}
+
+// WriteOffset
+func (unixfsOpts) WriteOffset(offset int64) UnixfsWriteOption {
+	return func(settings *UnixfsWriteSettings) error {
+		settings.Offset = offset
+		return nil
+	}
+}
+
+// Create
+func (unixfsOpts) Create(create bool) UnixfsWriteOption {
+	return func(settings *UnixfsWriteSettings) error {
+		settings.Create = create
+		return nil
+	}
+}
+
+// WriteParents
+func (unixfsOpts) WriteParents(parents bool) UnixfsWriteOption {
+	return func(settings *UnixfsWriteSettings) error {
+		settings.Parents = parents
+		return nil
+	}
+}
+
+// Truncate
+func (unixfsOpts) Truncate(truncate bool) UnixfsWriteOption {
+	return func(settings *UnixfsWriteSettings) error {
+		settings.Truncate = truncate
+		return nil
+	}
+}
+
+// WriteRawLeaves
+func (unixfsOpts) WriteRawLeaves(rawLeaves bool) UnixfsWriteOption {
+	return func(settings *UnixfsWriteSettings) error {
+		settings.RawLeaves = rawLeaves
+		return nil
+	}
+}
+
+// WriteCount
+func (unixfsOpts) WriteCount(count int64) UnixfsWriteOption {
+	return func(settings *UnixfsWriteSettings) error {
+		settings.Count = count
+		return nil
+	}
+}
+
+// WriteCidVersion
+func (unixfsOpts) WriteCidVersion(cidVersion int) UnixfsWriteOption {
+	return func(settings *UnixfsWriteSettings) error {
+		settings.CidVersion = cidVersion
+		return nil
+	}
+}
+
+// WriteHash
+func (unixfsOpts) WriteHash(mhtype uint64) UnixfsWriteOption {
+	return func(settings *UnixfsWriteSettings) error {
+		settings.MhType = mhtype
 		return nil
 	}
 }

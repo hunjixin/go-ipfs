@@ -2,6 +2,7 @@ package iface
 
 import (
 	"context"
+	"io"
 
 	"github.com/ipfs/boxo/files"
 	"github.com/ipfs/boxo/path"
@@ -59,6 +60,18 @@ type DirEntry struct {
 	Err error
 }
 
+// FileStat
+type FileStat struct {
+	Blocks         int
+	CumulativeSize uint64
+	Hash           string
+	Local          bool
+	Size           uint64
+	SizeLocal      uint64
+	Type           string
+	WithLocality   bool
+}
+
 // UnixfsAPI is the basic interface to immutable files in IPFS
 // NOTE: This API is heavily WIP, things are guaranteed to break frequently
 type UnixfsAPI interface {
@@ -66,6 +79,23 @@ type UnixfsAPI interface {
 	//
 	// TODO: a long useful comment on how to use this for many different scenarios
 	Add(context.Context, files.Node, ...options.UnixfsAddOption) (path.ImmutablePath, error)
+
+	// Mkdir Make directories
+	Mkdir(context.Context, string, ...options.UnixfsMkdirOption) error
+
+	// Rm remove directories
+	Rm(context.Context, string, ...options.UnixfsRmOption) error
+
+	// Rm remove directories
+	Cp(context.Context, string, string, ...options.UnixfsCpOption) error
+
+	// Read a file from MFS
+	Read(context.Context, string, ...options.UnixfsReadOption) (io.ReadCloser, error)
+	// Write a file from MFS
+	Write(context.Context, []files.Node, string, ...options.UnixfsWriteOption) error
+
+	// Stat a file from MFS
+	Stat(context.Context, string, ...options.UnixfsStatOption) (FileStat, error)
 
 	// Get returns a read-only handle to a file tree referenced by a path
 	//
