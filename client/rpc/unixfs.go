@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 
 	"github.com/ipfs/boxo/files"
 	unixfs "github.com/ipfs/boxo/ipld/unixfs"
@@ -49,6 +50,10 @@ func (api *UnixfsAPI) Add(ctx context.Context, f files.Node, opts ...caopts.Unix
 		Option("pin", options.Pin).
 		Option("silent", options.Silent).
 		Option("progress", options.Progress)
+
+	if len(options.ToFiles) > 0 {
+		req.Option("to-files", options.ToFiles)
+	}
 
 	if options.RawLeavesSet {
 		req.Option("raw-leaves", options.RawLeaves)
@@ -229,6 +234,160 @@ func (api *UnixfsAPI) Ls(ctx context.Context, p path.Path, opts ...caopts.Unixfs
 	}()
 
 	return out, nil
+}
+
+func (api *UnixfsAPI) Mkdir(ctx context.Context, p string, opts ...caopts.UnixfsMkdirOption) error {
+	options, _, err := caopts.UnixfsMkdirOptions(opts...)
+	if err != nil {
+		return err
+	}
+
+	mht, ok := mh.Codes[options.MhType]
+	if !ok {
+		return fmt.Errorf("unknowm mhType %d", options.MhType)
+	}
+
+	resp, err := api.core().Request("files/mkdir").
+		Option("parents", options.Parents).
+		Option("cid-version", options.CidVersion).
+		Option("hash", mht).
+		Arguments(p).
+		Send(ctx)
+	if err != nil {
+		return err
+	}
+	return resp.Error
+}
+
+func (api *UnixfsAPI) Rm(ctx context.Context, p string, opts ...caopts.UnixfsRmOption) error {
+	options, err := caopts.UnixfsRmOptions(opts...)
+	if err != nil {
+		return err
+	}
+
+	resp, err := api.core().Request("files/rm").
+		Option("recursive ", options.Recursive).
+		Option("force", options.Force).
+		Arguments(p).
+		Send(ctx)
+	if err != nil {
+		return err
+	}
+	return resp.Error
+}
+
+// Cp implements iface.UnixfsAPI.
+func (api *UnixfsAPI) Cp(ctx context.Context, src string, dest string, opts ...caopts.UnixfsCpOption) error {
+	options, err := caopts.UnixfsCpOptions(opts...)
+	if err != nil {
+		return err
+	}
+
+	resp, err := api.core().Request("files/cp").
+		Option("parents", options.Parents).
+		Arguments(src, dest).
+		Send(ctx)
+	if err != nil {
+		return err
+	}
+	return resp.Error
+}
+
+// Read implements iface.UnixfsAPI.
+func (api *UnixfsAPI) Read(ctx context.Context, p string, opts ...caopts.UnixfsReadOption) (io.ReadCloser, error) {
+	options, err := caopts.UnixfsReadOptions(opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	req := api.core().Request("files/read").
+		Arguments(p)
+	if options.Offset > 0 {
+		req = req.Option("offset", options.Offset)
+	}
+	if options.Count > 0 {
+		req = req.Option("count", options.Count)
+	}
+	resp, err := req.Send(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return resp.Output, resp.Error
+}
+
+// Stat implements iface.UnixfsAPI.
+func (api *UnixfsAPI) Stat(ctx context.Context, p string, opts ...caopts.UnixfsStatOption) (iface.FileStat, error) {
+	options, err := caopts.UnixfsStatOptions(opts...)
+	if err != nil {
+		return iface.FileStat{}, err
+	}
+
+	resp, err := api.core().Request("files/stat").
+		Option("format", options.Format).
+		Option("hash", options.Hash).
+		Option("size", options.Size).
+		Option("with-local", options.WithLocal).
+		Arguments(p).
+		Send(ctx)
+	if err != nil {
+		return iface.FileStat{}, err
+	}
+	if resp.Error != nil {
+		return iface.FileStat{}, resp.Error
+	}
+	stat := iface.FileStat{}
+	err = resp.decode(&stat)
+	if err != nil {
+		return iface.FileStat{}, err
+	}
+
+	return stat, nil
+}
+
+// Write implements iface.UnixfsAPI.
+func (api *UnixfsAPI) Write(ctx context.Context, fs []files.Node, p string, opts ...caopts.UnixfsWriteOption) error {
+	options, _, err := caopts.UnixfsWriteOptions(opts...)
+	if err != nil {
+		return err
+	}
+
+	mht, ok := mh.Codes[options.MhType]
+	if !ok {
+		return fmt.Errorf("unknowm mhType %d", options.MhType)
+	}
+
+	req := api.core().Request("files/write").
+		Option("create", options.Create).
+		Option("parents", options.Parents).
+		Option("truncate", options.Truncate).
+		Option("raw-leaves", options.RawLeaves).
+		Option("cid-version", options.CidVersion).
+		Option("hash", mht).Arguments(p)
+	if options.Offset > 0 {
+		req = req.Option("offset", options.Offset)
+	}
+	if options.Count > 0 {
+		req = req.Option("count", options.Count)
+	}
+
+	nodes := map[string]files.Node{}
+	for index, node := range fs {
+		nodes[strconv.Itoa(index)] = node
+	}
+	d := files.NewMapDirectory(nodes)
+
+	version, err := api.core().loadRemoteVersion()
+	if err != nil {
+		return err
+	}
+	useEncodedAbsPaths := version.LT(encodedAbsolutePathVersion)
+	req.Body(files.NewMultiFileReader(d, false, useEncodedAbsPaths))
+
+	resp, err := req.Send(ctx)
+	if err != nil {
+		return err
+	}
+	return resp.Error
 }
 
 func (api *UnixfsAPI) core() *HttpApi {

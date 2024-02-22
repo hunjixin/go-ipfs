@@ -3,14 +3,13 @@ package coreapi
 import (
 	"context"
 	"fmt"
+	"io"
 	"sync"
 
 	"github.com/ipfs/kubo/core"
 	"github.com/ipfs/kubo/tracing"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
-
-	"github.com/ipfs/kubo/core/coreunix"
 
 	blockservice "github.com/ipfs/boxo/blockservice"
 	bstore "github.com/ipfs/boxo/blockstore"
@@ -28,14 +27,45 @@ import (
 	ipld "github.com/ipfs/go-ipld-format"
 	coreiface "github.com/ipfs/kubo/core/coreiface"
 	options "github.com/ipfs/kubo/core/coreiface/options"
+	"github.com/ipfs/kubo/core/coreunix"
 )
 
 type UnixfsAPI CoreAPI
+
+// Write implements iface.UnixfsAPI.
+func (*UnixfsAPI) Write(context.Context, []files.Node, string, ...options.UnixfsWriteOption) error {
+	panic("unimplemented")
+}
+
+// Stat implements iface.UnixfsAPI.
+func (*UnixfsAPI) Stat(context.Context, string, ...options.UnixfsStatOption) (coreiface.FileStat, error) {
+	panic("unimplemented")
+}
+
+// Read implements iface.UnixfsAPI.
+func (*UnixfsAPI) Read(context.Context, string, ...options.UnixfsReadOption) (io.ReadCloser, error) {
+	panic("unimplemented")
+}
 
 var (
 	nilNode *core.IpfsNode
 	once    sync.Once
 )
+
+// Cp Add references to IPFS files and directories in MFS (or copy within MFS).
+func (api *UnixfsAPI) Cp(ctx context.Context, source string, dest string, opts ...options.UnixfsCpOption) error {
+	panic("not impl")
+}
+
+// Mkdir create directory.
+func (api *UnixfsAPI) Mkdir(ctx context.Context, p string, opts ...options.UnixfsMkdirOption) error {
+	panic("not impl")
+}
+
+// Rm implements iface.UnixfsAPI.
+func (api *UnixfsAPI) Rm(ctx context.Context, p string, opts ...options.UnixfsRmOption) error {
+	panic("not impl")
+}
 
 func getOrCreateNilNode() (*core.IpfsNode, error) {
 	once.Do(func() {
